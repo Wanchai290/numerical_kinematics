@@ -103,28 +103,24 @@ r_poses = simplify([RwT4(1:3, 4) RwT5(1:3, 4) RwT6(1:3, 4) RwT7(1:3, 4)]); % onl
 
 % define obstacle to avoid
 syms xo yo zo real;
-Obs_P = [xo yo zo];
+Obs_P = [xo;yo;zo];
 
 % create Phi function for vector Z
+Phi_f = 0; % scalar function
+for i = 1:length(r_poses)
+    Phi_f = Phi_f + 1 / sqrt(sum(Obs_P - r_poses(1:3, i)) .^2);
+end
 
-disp('fixme :c')
-Phi_f = [
-    1 / sqrt(sum(Obs_P - r_poses(1:3, 1)) .^2)
-    1 / sqrt(sum(Obs_P - r_poses(1:3, 2)) .^2)
-    1 / sqrt(sum(Obs_P - r_poses(1:3, 3)) .^2)
-    1 / sqrt(sum(Obs_P - r_poses(1:3, 4)) .^2)
-]; % scalar function
+% Compute the gradient of the Phi function with respect to the joint positions
+grad_Phi_f = gradient(Phi_f, [theta3 theta4 theta5 theta6 theta7 theta8])
 
 %%
-displayFormula(string(Phi_f))
-% Compute the gradient of the Phi function with respect to the joint positions
-grad_Phi_f = gradient(Phi_f, [theta4 theta5 theta6 theta7]);
-
 % complete MGD works on rotations not working on the (x, z) plane
 % ignore those
-Z = [0; grad_Phi_f; 0]
+%Z = [0; grad_Phi_f; 0]
+Z = grad_Phi_f;
 
-matlabFunction(Z, 'File', 'clc_Z.m', 'Vars', [L Theta Obs_P]);
+matlabFunction(Z, 'File', 'clc_Z.m', 'Vars', [L Theta Obs_P']);
 %%
 
 % Newton-Raphson scheme
@@ -134,30 +130,35 @@ matlabFunction(Z, 'File', 'clc_Z.m', 'Vars', [L Theta Obs_P]);
 L = [0 0 1 1 1 1 1 0];
 q0 = [0; 0; 0; 0; 0; 0];
 In = eye(length(q0));
-max_iter = 1;
 q = q0;
 
 % define target position X
 P_target = [2; 0; 3]; % column vector
-X = RwT9(1:3, 4) - P_target;
+
+P_end_effector = clc_mgd(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
+    q(1), q(2), q(3), q(4), q(5), q(6));
+X = P_end_effector - P_target
 
 % obstacle O
 Obs_P = [1.5; 0 ;1];
 size(Z)
 
 %%
+max_iter = 1000;
 for step = 1:max_iter
-    disp(step);
     % this is messier than my own room
     % i'm open to suggestion to prettify this
     J = clc_jacobian_mgd(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
     q(1), q(2), q(3), q(4), q(5), q(6));
     pinv_J = clc_pinv(J);
     Z = clc_Z(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
-    q(1), q(2), q(3), q(4), q(5), q(6), Obs_P(1), Obs_P(2), Obs_P(3));
+        q(1), q(2), q(3), q(4), q(5), q(6), Obs_P(1), Obs_P(2), Obs_P(3));
+    P_end_effector = clc_mgd(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
+        q(1), q(2), q(3), q(4), q(5), q(6));
+    X = P_end_effector - P_target;
 
     % update found angles
     q = pinv_J * X + (In - pinv_J * J) * Z;
 end
 
-disp(q);
+q
