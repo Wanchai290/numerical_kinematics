@@ -1,36 +1,56 @@
 clear; close all; clc;
 addpath('tr_homogenes/');
 
-% Robot PPRR
+% Robot PPR 4R R
 % MGD
-syms l1 l2 l3 l4 l5 l6 l7 theta3 theta4 theta5 theta6 theta7 real;
+syms l1 l2 l3 l4 l5 l6 l7 l8 theta3 theta4 theta5 theta6 theta7 theta8 real;
+L = [l1 l2 l3 l4 l5 l6 l7 l8];
+Theta = [theta3 theta4 theta5 theta6 theta7 theta8];
 Pi=sym(pi);
-
+    
+% world to robot frame
 RwT1 = th_rotz(Pi/2) * th_trans(0, 0, 0) * th_rotx(Pi/2);
 
+% prismatic joints - tracks
 R1T2 = th_rotz(Pi/2) * th_trans(0, 0, l1) * th_rotx(Pi/2);
 R2T3 = th_rotz(-Pi/2) * th_trans(0, 0, l2) * th_rotx(-Pi/2);
+
+% rotoid on z axis
 R3T4 = th_rotz(theta3) * th_trans(0, 0, l3) * th_rotx(-Pi/2);
+
+% 4R on xy plane
 R4T5 = th_rotz(theta4) * th_trans(-l4, 0, 0);
 R5T6 = th_rotz(theta5) * th_trans(-l5, 0, 0);
-R6T7 = th_rotz(theta6 + Pi/2) * th_trans(l6, 0, 0) *th_rotx(-Pi/2);
-R7T8 = th_rotz(theta7);
+R6T7 = th_rotz(theta6) * th_trans(-l6, 0, 0);
+R7T8= th_rotz(theta7 + Pi/2) * th_trans(l7, 0, 0) *th_rotx(-Pi/2);
 
-RwT8 = RwT1 * R1T2 * R2T3 * R3T4 * R4T5 * R5T6 * R6T7 * R7T8;
-RwT8(1:3, 4)
+% camera roll rotoid
+R8T9 = th_rotz(theta8) * th_trans(0, 0, l8);
 
-RwT8_S = subs(RwT8, [theta3 theta4 theta5 theta6 theta7], [0 0 0 0 0]);
-RwT8_S(1:3, 4)  % expected position of end-effector
 
-%% Newton's method MGI
+% world -> end-effector
+RwT9 = RwT1 * R1T2 * R2T3 * R3T4 * R4T5 * R5T6 * R6T7 * R7T8 * R8T9;
+RwT9(1:3, 4)
+
+RwT9_S = subs(RwT9, [theta3 theta4 theta5 theta6 theta7 theta8], [0 0 0 0 0 0]);
+RwT9_S(1:3, 4)  % expected position of end-effector
+
+
+RwPR9 = RwT9(1:3, 4);
+matlabFunction(RwPR9, 'File', 'clc_mgd.m', 'Vars', [L Theta]);
+
+J_RwPR9 = jacobian(RwPR9, Theta);
+matlabFunction(J_RwPR9, 'File', 'clc_jacobian_mgd.m', 'Vars', [L Theta]);
+
+%{
+% Newton's method MGI
 % Newton Raphson method : Solve f(x) = 0
-% Suppose the world frame is R1
 % We want the end-effector to be at a specific location 
 % P_target = [xp; yp; zp]
 
 % The direct geometric model is located in the last column of the 
 % homogeneous transform R1T5
-RwPR8 = RwT8(1:3, 4);
+RwPR9 = RwT9(1:3, 4);
 
 % We want to have the end-effector point at a specific location
 % in the world frame
@@ -38,39 +58,106 @@ syms xp yp zp real;
 P_target = [xp; yp; zp]; % world frame
 
 % This means solving
-%     RwPR8 = P_target
-% <=> RwPR8- P_target = 0
-f = RwPR8 - P_target
+%     RwPR9 = P_target
+% <=> RwPR9- P_target = 0
+f = RwPR9 - P_target
 J = jacobian(f, [theta3 theta4 theta5 theta6 theta7])
-
+size(J)
 % By directly computing the inverse (computationally inefficient)
-J_inv = pinv(J)
+% J_inv = pinv(J)
 
-% Newton-Raphson theme
+% Newton-Raphson scheme
 % Xn = Xn-1 - Jf(Xn-1)^-1 
 
 %%
-l = [0 0 1 1 1 1 1];
-f = subs(f, [l1 l2 l3 l4 l5 l6 l7 Pi], [l pi]);
-J_inv = subs(J_inv, [l1 l2 l3 l4 l5 l6 l7 Pi], [l pi]);
+l = [0 0 1 1 1 1 1 0];
+f = subs(f, [l1 l2 l3 l4 l5 l6 l7 l8 Pi], [l pi]);
+J_inv = subs(J_inv, [l1 l2 l3 l4 l5 l6 l7 l8 Pi], [l pi]);
 
 % using values for MGD above
 S_P_target = [1, 0, 3];
 f = subs(f, [xp yp zp], S_P_target);
 J_inv = subs(J_inv, [xp yp zp], S_P_target);
 
-%f = subs(f, [xp yp zp], [-1, 1, 1]);
-%J_inv = subs(J_inv, [xp yp zp], [-1, 1, 1]);
-
-X = [pi; pi];  % theta angles
+X = [pi; pi; pi; pi; pi];  % theta angles
 
 disp('start newton-raphson method')
 for i = 1:6
-    disp(double(X))
-    disp(i)
-
-    S_J_inv = subs(J_inv, [theta3; theta4], X);
-    S_f = subs(f, [theta3; theta4], X);
+    % replace with matlabFunction call (faster)
+    S_J_inv = subs(J_inv, [theta3 theta4 theta5 theta6 theta7], X);
+    S_f = subs(f, [theta3 theta4 theta5 theta6 theta7], X);
     X = X - S_J_inv * S_f;
 end
 disp('end');
+%}
+
+%% Newton-Raphson + Moving inside the null-space of J
+% get direct kinematic model for each rotoid joint
+RwT4 = RwT1 * R1T2 * R2T3 * R3T4;
+RwT5 = RwT1 * R1T2 * R2T3 * R3T4 * R4T5;
+RwT6 = RwT1 * R1T2 * R2T3 * R3T4 * R4T5 * R5T6;
+RwT7 = RwT1 * R1T2 * R2T3 * R3T4 * R4T5 * R5T6 * R6T7;
+
+% generate function to retrieve position of each rotoid joint on the plane
+r_poses = simplify([RwT4(1:3, 4) RwT5(1:3, 4) RwT6(1:3, 4) RwT7(1:3, 4)]); % only position required
+
+% define obstacle to avoid
+syms xo yo zo real;
+Obs_P = [xo yo zo];
+
+% create Phi function for vector Z
+
+disp('fixme :c')
+Phi_f = [
+    1 / sqrt(sum(Obs_P - r_poses(1:3, 1)) .^2)
+    1 / sqrt(sum(Obs_P - r_poses(1:3, 2)) .^2)
+    1 / sqrt(sum(Obs_P - r_poses(1:3, 3)) .^2)
+    1 / sqrt(sum(Obs_P - r_poses(1:3, 4)) .^2)
+]; % scalar function
+
+%%
+displayFormula(string(Phi_f))
+% Compute the gradient of the Phi function with respect to the joint positions
+grad_Phi_f = gradient(Phi_f, [theta4 theta5 theta6 theta7]);
+
+% complete MGD works on rotations not working on the (x, z) plane
+% ignore those
+Z = [0; grad_Phi_f; 0]
+
+matlabFunction(Z, 'File', 'clc_Z.m', 'Vars', [L Theta Obs_P]);
+%%
+
+% Newton-Raphson scheme
+
+% only 4R plane robot has lengths of 1
+% and joint 3 to put it at z-height of 1
+L = [0 0 1 1 1 1 1 0];
+q0 = [0; 0; 0; 0; 0; 0];
+In = eye(length(q0));
+max_iter = 1;
+q = q0;
+
+% define target position X
+P_target = [2; 0; 3]; % column vector
+X = RwT9(1:3, 4) - P_target;
+
+% obstacle O
+Obs_P = [1.5; 0 ;1];
+size(Z)
+
+%%
+for step = 1:max_iter
+    disp(step);
+    % this is messier than my own room
+    % i'm open to suggestion to prettify this
+    J = clc_jacobian_mgd(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
+    q(1), q(2), q(3), q(4), q(5), q(6));
+    pinv_J = clc_pinv(J);
+    Z = clc_Z(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
+    q(1), q(2), q(3), q(4), q(5), q(6), Obs_P(1), Obs_P(2), Obs_P(3));
+
+    % update found angles
+    q = pinv_J * X + (In - pinv_J * J) * Z;
+end
+
+disp(q);
