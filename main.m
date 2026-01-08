@@ -39,9 +39,6 @@ RwT9_S(1:3, 4)  % expected position of end-effector
 RwPR9 = RwT9(1:3, 4);
 matlabFunction(RwPR9, 'File', 'clc_mgd.m', 'Vars', [L Theta]);
 
-J_RwPR9 = jacobian(RwPR9, Theta);
-matlabFunction(J_RwPR9, 'File', 'clc_jacobian_mgd.m', 'Vars', [L Theta]);
-
 %{
 % Newton's method MGI
 % Newton Raphson method : Solve f(x) = 0
@@ -102,28 +99,43 @@ RwT7 = RwT1 * R1T2 * R2T3 * R3T4 * R4T5 * R5T6 * R6T7;
 r_poses = simplify([RwT4(1:3, 4) RwT5(1:3, 4) RwT6(1:3, 4) RwT7(1:3, 4)]); % only position required
 
 % define obstacle to avoid
-syms xo yo zo real;
+syms xo yo zo Obs_r real;
 Obs_P = [xo;yo;zo];
+
+% L2 distance vectorized function
+function dist = clc_dist(A, B, r)
+    % size(A) = 3 1
+    d = sqrt(A - B) .^2;
+    dist(d <= r) = d;
+    dist(d > r) = 0;
+end
 
 % create Phi function for vector Z
 Phi_f = 0; % scalar function
 for i = 1:length(r_poses)
-    Phi_f = Phi_f + 1 / sqrt(sum(Obs_P - r_poses(1:3, i)) .^2);
+    d = clc_dist(Obs_P, r_poses(1:3, i), Obs_r);
+    if d ~= 0
+        Phi_f = Phi_f + 1 / d;
+    end
 end
 
 % Compute the gradient of the Phi function with respect to the joint positions
 grad_Phi_f = gradient(Phi_f, [theta3 theta4 theta5 theta6 theta7 theta8])
-
-%%
-% complete MGD works on rotations not working on the (x, z) plane
-% ignore those
-%Z = [0; grad_Phi_f; 0]
 Z = grad_Phi_f;
 
 matlabFunction(Z, 'File', 'clc_Z.m', 'Vars', [L Theta Obs_P']);
 %%
+% define target position X
+P_target = [2; 0; 3]; % column vector
+P_end_effector = RwPR9;
 
+f = P_end_effector - P_target;
+matlabFunction(f, 'File', 'clc_f.m', 'Vars', [L Theta]);
+J_f = jacobian(f, [theta3 theta4 theta5 theta6 theta7 theta8]);
+matlabFunction(J_f, 'File', 'clc_jacobian_f.m', 'Vars', [L Theta]);
+%%
 % Newton-Raphson scheme
+clear;
 
 % only 4R plane robot has lengths of 1
 % and joint 3 to put it at z-height of 1
@@ -132,33 +144,26 @@ q0 = [0; 0; 0; 0; 0; 0];
 In = eye(length(q0));
 q = q0;
 
-% define target position X
-P_target = [2; 0; 3]; % column vector
-
-P_end_effector = clc_mgd(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
-    q(1), q(2), q(3), q(4), q(5), q(6));
-X = P_end_effector - P_target
-
 % obstacle O
 Obs_P = [1.5; 0 ;1];
-size(Z)
 
-%%
-max_iter = 1000;
+
+max_iter = 200;
 for step = 1:max_iter
     % this is messier than my own room
     % i'm open to suggestion to prettify this
-    J = clc_jacobian_mgd(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
+    f = clc_f(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
     q(1), q(2), q(3), q(4), q(5), q(6));
-    pinv_J = clc_pinv(J);
+    J_f = clc_jacobian_f(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
+    q(1), q(2), q(3), q(4), q(5), q(6));
+    pinv_J_f = clc_pinv(J_f);
     Z = clc_Z(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
-        q(1), q(2), q(3), q(4), q(5), q(6), Obs_P(1), Obs_P(2), Obs_P(3));
-    P_end_effector = clc_mgd(L(1), L(2), L(3), L(4), L(5), L(6), L(7), L(8), ...
-        q(1), q(2), q(3), q(4), q(5), q(6));
-    X = P_end_effector - P_target;
-
-    % update found angles
-    q = pinv_J * X + (In - pinv_J * J) * Z;
+        q(1), q(2), q(3), q(4), q(5), q(6), Obs_P(1), Obs_P(2), Obs_P(3))
+    
+    q = q - pinv_J_f * f + (In - pinv_J_f * J_f) * Z;
 end
-
+function x = clipZeroOne(x)
+x(x < 0) = 0;
+x(x > 1) = -1;
+end
 q
