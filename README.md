@@ -27,3 +27,6 @@ Uses the Newton-Raphson method to solve the inverse geometric model of the robot
 
 ### Third section : Resulting 3D plot
 Displays a 3D plot with both the simple solution and the solution that avoids obstacles.
+
+## About pseudo-inverse computation
+We used a result of the SVD to perform it, but really we should've changed the totality of the code to use the SVD decomposition instead, so computations run faster. But there was no time left for this project.
